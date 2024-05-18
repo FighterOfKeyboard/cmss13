@@ -53,7 +53,21 @@
 	if(..() || !allowed(user) || inoperable())
 		return
 
-	ui_interact(user)
+	if(!allowed(user))
+		to_chat(usr, SPAN_WARNING("Access denied."))
+		return FALSE
+
+	if(!istype(loc.loc, /area/almayer/command/cic)) //Has to be in the CIC. Can also be a generic CIC area to communicate, if wanted.
+		to_chat(usr, SPAN_WARNING("Unable to establish a connection."))
+		return FALSE
+
+	tgui_interact(user)
+
+/obj/structure/machinery/computer/groundside_operations/tgui_interact(mob/user, datum/tgui/ui, datum/ui_state/state)
+	ui = SStgui.try_update_ui(user, src, ui)
+	if(!ui)
+		ui = new(user, src, "AlmayerControl", "[name]")
+		ui.open()
 
 /obj/structure/machinery/computer/groundside_operations/ui_interact(mob/user as mob)
 	user.set_interaction(src)
