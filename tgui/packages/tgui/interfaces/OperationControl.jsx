@@ -9,61 +9,51 @@ export const OperationControl = (_props) => {
   const worldTime = data.worldtime;
   const messages = data.messages;
 
-  const evacstatus = data.evac_status;
-  const evacEta = data.evac_eta;
+  const SelectedSquad = data.selected_squad;
+  const ShowCommandSquad = data.show_command_squad;
 
-  const AlertLevel = data.alert_level;
 
-  const minimumTimeElapsed = worldTime > data.distresstimelock;
+  const selectedLZ = data.selected_LZ;/*(data.selected_LZ !== 'lz1' || data.selected_LZ !== 'lz2');*/
+  
 
-  const canMessage = data.time_message < worldTime; // ship announcement
-  const canRequest = // requesting distress beacon
-    data.time_request < worldTime && AlertLevel === 2 && minimumTimeElapsed;
-  const canEvac = (evacstatus === 0, AlertLevel >= 2); // triggering evac
-  const canDestruct =
-    data.time_destruct < worldTime && minimumTimeElapsed && AlertLevel === 2;
-  const canCentral = data.time_central < worldTime; // messaging HC
 
-  let distress_reason;
-  let destruct_reason;
-  if (AlertLevel === 3) {
-    distress_reason = 'Self-destruct in progress. Beacon disabled.';
-    destruct_reason = 'Self-destruct is already active!';
-  } else if (AlertLevel !== 2) {
-    distress_reason = 'Ship is not under an active emergency.';
-    destruct_reason = 'Ship is not under an active emergency.';
-  } else if (data.time_request < worldTime) {
-    distress_reason =
-      'Beacon is currently recharging. Time remaining: ' +
-      Math.ceil((data.time_message - worldTime) / 10) +
-      'secs.';
-  } else if (data.time_destruct < worldTime) {
-    destruct_reason =
-      'A request has already been sent to HC. Please wait: ' +
-      Math.ceil((data.time_destruct - worldTime) / 10) +
-      'secs to send another.';
-  } else if (!minimumTimeElapsed) {
-    distress_reason = "It's too early to launch a distress beacon.";
-    destruct_reason = "It's too early to initiate the self-destruct.";
+  const canAnnounce = data.endtime < worldTime; // announcement
+
+  let canSelectLZ;
+  if (selectedLZ === '' || selectedLZ === null) {
+    canSelectLZ = true;
+  }
+  else {
+    canSelectLZ = false;
   }
 
-  let alertLevelString;
-  let alertLevelColor;
-  if (AlertLevel === 3) {
-    alertLevelString = 'DELTA';
-    alertLevelColor = 'purple';
+
+  let squadColor;
+  if (SelectedSquad === 'Intel') {
+    squadColor = 'green';
   }
-  if (AlertLevel === 2) {
-    alertLevelString = 'RED';
-    alertLevelColor = 'red';
+  if (SelectedSquad === 'Alpha') {
+    squadColor = 'red';
   }
-  if (AlertLevel === 1) {
-    alertLevelString = 'BLUE';
-    alertLevelColor = 'blue';
+  if (SelectedSquad === 'Bravo') {
+    squadColor = 'yellow';
   }
-  if (AlertLevel === 0) {
-    alertLevelString = 'GREEN';
-    alertLevelColor = 'green';
+  if (SelectedSquad === 'Charlie') {
+    squadColor = 'purple';
+  }
+  if (SelectedSquad === 'Delta') {
+    squadColor = 'blue';
+  }
+  if (SelectedSquad === 'Echo') {
+    squadColor = 'teal';
+  }
+  let squadText;
+  if (!ShowCommandSquad) {
+    squadText = SelectedSquad;
+  }
+  else {
+    squadText = 'Command';
+    squadColor = 'black';
   }
 
   return (
@@ -72,153 +62,64 @@ export const OperationControl = (_props) => {
         <Section title="Operation Control">
           <Flex height="100%" direction="column">
             <Flex.Item>
-              {!canMessage && (
+              {!canAnnounce && (
                 <Button color="bad" warning={1} fluid={1} icon="ban">
-                  *Unavailable*:{' '}
-                  {Math.ceil((data.time_message - worldTime) / 10)} secs
+                  Announcement recharging:{' '}
+                  {Math.ceil((data.endtime - data.worldtime) / 10)} secs
                 </Button>
               )}
-              {!!canMessage && (
+              {!!canAnnounce && (
                 <Button
                   fluid={1}
                   icon="bullhorn"
                   title="Make an announcement"
                   content="Make an announcement"
                   onClick={() => act('announce')}
-                  //disabled={!canMessage}
+                  disabled={!canAnnounce}
                 />
               )}
             </Flex.Item>
             <Flex.Item>
-              {!canCentral && (
-                <Button color="bad" warning={1} fluid={1} icon="ban">
-                  Quantum relay re-cycling :{' '}
-                  {Math.ceil((data.time_message - worldTime) / 10)} secs
-                </Button>
-              )}
-              {!!canCentral && (
                 <Button
                   fluid={1}
-                  icon="paper-plane"
-                  title="TACMAP"
-                  content="TACMAP"
+                  icon="map"
+                  title="Tacmap"
+                content="Tacmap"
                   onClick={() => act('mapview')}
-                  //disabled={!canCentral}
+                />
+            </Flex.Item>
+            <Flex.Item>
+              <Button
+                fluid={1}
+                icon="arrow-up-from-bracket"
+                title="Designate Echo Squad"
+                content="Designate Echo Squad"
+                onClick={() => act('activate_echo')}
+              />
+            </Flex.Item>
+            <Flex.Item>
+             
+              {!!canSelectLZ && (
+                <Button
+                  fluid={1}
+                  icon="plane-arrival"
+                  title="Designate Primary LZ"
+                  content="Designate Primary LZ"
+                  color = 'bad'
+                  onClick={() => act('selectlz')}
+                  disabled={!canSelectLZ}
                 />
               )}
             </Flex.Item>
-            <Flex.Item>
-              <Button
-                fluid={1}
-                icon="medal"
-                title="Designate Echo Squad"
-                content="Designate Echo Squad"
-                onClick={() => act('pick_squad')}
-              />
-            </Flex.Item>
-            <Flex.Item>
-              <Button
-                fluid={1}
-                icon="medal"
-                title="Designate Primary LZ"
-                content="Designate Primary LZ"
-                onClick={() => act('selectlz')}
-              />
-            </Flex.Item>
-            <Section title="Emergency measures">
-              {AlertLevel < 2 && (
-                <NoticeBox color="bad" warning={1} textAlign="center">
-                  The ship must be under red alert in order to enact evacuation
-                  procedures.
-                </NoticeBox>
-              )}
-              {evacstatus === 0 && (
-                <Flex.Item>
-                  <Button.Confirm
-                    fluid={1}
-                    color="orange"
-                    icon="door-open"
-                    content={'Initiate Evacuation'}
-                    confirmColor="bad"
-                    confirmContent="Confirm?"
-                    confirmIcon="question"
-                    onClick={() => act('evacuation_start')}
-                    disabled={!canEvac}
-                  />
-                </Flex.Item>
-              )}
-              {evacstatus === 1 && (
-                <Flex.Item>
-                  <NoticeBox color="good" info={1} textAlign="center">
-                    Evacuation ongoing. Time until escape pod launch: {evacEta}.
-                  </NoticeBox>
-                  <Button.Confirm
-                    fluid={1}
-                    color="red"
-                    icon="ban"
-                    content={'Cancel Evacuation'}
-                    confirmColor="bad"
-                    confirmContent="Confirm?"
-                    confirmIcon="question"
-                    onClick={() => act('evacuation_cancel')}
-                  />
-                </Flex.Item>
-              )}
-              {evacstatus === 2 && (
-                <NoticeBox color="good" info={1} textAlign="center">
-                  Escape pods launching.
-                </NoticeBox>
-              )}
-              {evacstatus === 3 && (
-                <NoticeBox color="good" success={1} textAlign="center">
-                  Evacuation complete.
-                </NoticeBox>
-              )}
+            <Section title="Squad Selection">
               <Flex.Item>
-                {!canDestruct && (
-                  <Button
-                    disabled={1}
-                    content={'Self-destruct disabled!'}
-                    tooltip={destruct_reason}
-                    fluid={1}
-                    icon="ban"
-                  />
-                )}
-                {canDestruct && (
-                  <Button.Confirm
-                    fluid={1}
-                    color="red"
-                    icon="explosion"
-                    content={'Request to initiate Self-destruct'}
-                    confirmColor="bad"
-                    confirmContent="Confirm Self-destruct?"
-                    confirmIcon="question"
-                    onClick={() => act('destroy')}
-                  />
-                )}
-              </Flex.Item>
-              <Flex.Item>
-                {!canRequest && (
-                  <Button
-                    disabled={1}
-                    content={'Distress Beacon disabled'}
-                    tooltip={distress_reason}
-                    fluid={1}
-                    icon="ban"
-                  />
-                )}
-                {canRequest && (
-                  <Button.Confirm
-                    fluid={1}
-                    color="orange"
-                    icon="phone-volume"
-                    content={'Send Distress Beacon'}
-                    confirmColor="bad"
-                    confirmContent="Confirm?"
-                    confirmIcon="question"
-                    onClick={() => act('distress')}
-                  />
-                )}
+                <Button
+                  fluid={1}
+                  color={squadColor}
+                  icon="triangle-exclamation"
+                  onClick={() => act('pick_squad')}>
+                  {squadText}
+                </Button>
               </Flex.Item>
             </Section>
           </Flex>

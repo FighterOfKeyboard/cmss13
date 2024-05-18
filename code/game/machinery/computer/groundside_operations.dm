@@ -8,6 +8,12 @@
 	unslashable = TRUE
 	unacidable = TRUE
 
+	/// making an announcement
+	COOLDOWN_DECLARE(announcement_cooldown)
+
+	var/list/messagetitle = list()
+	var/list/messagetext = list()
+
 	var/obj/structure/machinery/camera/cam = null
 	var/datum/squad/current_squad = null
 
@@ -66,8 +72,182 @@
 /obj/structure/machinery/computer/groundside_operations/tgui_interact(mob/user, datum/tgui/ui, datum/ui_state/state)
 	ui = SStgui.try_update_ui(user, src, ui)
 	if(!ui)
-		ui = new(user, src, "AlmayerControl", "[name]")
+		ui = new(user, src, "OperationControl", "[name]")
 		ui.open()
+
+/obj/structure/machinery/computer/groundside_operations/ui_status(mob/user, datum/ui_state/state)
+	. = ..()
+	if(!allowed(user))
+		return UI_CLOSE
+	if(!operable())
+		return UI_CLOSE
+
+/obj/structure/machinery/computer/groundside_operations/ui_state(mob/user)
+	return GLOB.not_incapacitated_and_adjacent_strict_state
+
+// tgui data \\
+
+/obj/structure/machinery/computer/groundside_operations/ui_static_data(mob/user)
+	var/list/data = list()
+
+	data["cooldown_message"] = COOLDOWN_COMM_MESSAGE
+
+	return data
+
+/obj/structure/machinery/computer/groundside_operations/ui_data(mob/user)
+	var/list/data = list()
+	var/list/messages = list()
+
+	data["selected_squad"] = current_squad
+	data["show_command_squad"] = show_command_squad
+
+	data["endtime"] = announcement_cooldown
+
+	data["worldtime"] = world.time
+
+	data["selected_LZ"] = SSticker.mode.active_lz
+
+	data["evac_status"] = SShijack.evac_status
+	if(SShijack.evac_status == EVACUATION_STATUS_INITIATED)
+		data["evac_eta"] = SShijack.get_evac_eta()
+
+	if(!messagetitle.len)
+		data["messages"] = null
+	else
+		for(var/i in 1 to length(messagetitle))
+			var/list/messagedata = list(list(
+				"title" = messagetitle[i],
+				"text" = messagetext[i],
+				"number" = i
+			))
+			messages += messagedata
+
+		data["messages"] = messages
+
+	return data
+
+// end tgui data \\
+
+// tgui interact \\
+
+/obj/structure/machinery/computer/groundside_operations/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
+	. = ..()
+	if(.)
+		return
+	var/mob/user = ui.user
+	switch(action)
+		if("announce")
+			var/mob/living/carbon/human/human_user = usr
+			var/obj/item/card/id/idcard = human_user.get_active_hand()
+			var/bio_fail = FALSE
+			if(!istype(idcard))
+				idcard = human_user.wear_id
+			if(!istype(idcard))
+				bio_fail = TRUE
+			else if(!idcard.check_biometrics(human_user))
+				bio_fail = TRUE
+			if(bio_fail)
+				to_chat(human_user, SPAN_WARNING("Biometrics failure! You require an authenticated ID card to perform this action!"))
+				return FALSE
+
+			if(usr.client.prefs.muted & MUTE_IC)
+				to_chat(usr, SPAN_DANGER("You cannot send Announcements (muted)."))
+				return
+
+			if(!is_announcement_active)
+				to_chat(usr, SPAN_WARNING("Please allow at least [COOLDOWN_COMM_MESSAGE*0.1] second\s to pass between announcements."))
+				return FALSE
+			if(announcement_faction != FACTION_MARINE && usr.faction != announcement_faction)
+				to_chat(usr, SPAN_WARNING("Access denied."))
+				return
+			var/input = stripped_multiline_input(usr, "Please write a message to announce to the station crew.", "Priority Announcement", "")
+			if(!input || !is_announcement_active || !(usr in view(1,src)))
+				return FALSE
+
+			is_announcement_active = FALSE
+
+			var/signed = null
+			if(ishuman(usr))
+				var/mob/living/carbon/human/H = usr
+				var/obj/item/card/id/id = H.wear_id
+				if(istype(id))
+					var/paygrade = get_paygrades(id.paygrade, FALSE, H.gender)
+					signed = "[paygrade] [id.registered_name]"
+
+			COOLDOWN_START(src, announcement_cooldown, COOLDOWN_COMM_MESSAGE)
+			marine_announcement(input, announcement_title, faction_to_display = announcement_faction, add_PMCs = add_pmcs, signature = signed)
+			addtimer(CALLBACK(src, PROC_REF(reactivate_announcement), usr), COOLDOWN_COMM_MESSAGE)
+			message_admins("[key_name(usr)] has made a command announcement.")
+			log_announcement("[key_name(usr)] has announced the following: [input]")
+			
+		if("mapview")
+			tacmap.tgui_interact(usr)
+			return
+
+		if("activate_echo")
+			var/mob/living/carbon/human/human_user = usr
+			var/obj/item/card/id/idcard = human_user.get_active_hand()
+			var/bio_fail = FALSE
+			if(!istype(idcard))
+				idcard = human_user.wear_id
+			if(!istype(idcard))
+				bio_fail = TRUE
+			else if(!idcard.check_biometrics(human_user))
+				bio_fail = TRUE
+			if(bio_fail)
+				to_chat(human_user, SPAN_WARNING("Biometrics failure! You require an authenticated ID card to perform this action!"))
+				return FALSE
+
+			var/reason = strip_html(input(usr, "What is the purpose of Echo Squad?", "Activation Reason"))
+			if(!reason)
+				return
+			if(alert(usr, "Confirm activation of Echo Squad for [reason]", "Confirm Activation", "Yes", "No") != "Yes") return
+			var/datum/squad/marine/echo/echo_squad = locate() in GLOB.RoleAuthority.squads
+			if(!echo_squad)
+				visible_message(SPAN_BOLDNOTICE("ERROR: Unable to locate Echo Squad database."))
+				return
+			echo_squad.engage_squad(TRUE)
+			message_admins("[key_name(usr)] activated Echo Squad for '[reason]'.")
+
+		if("selectlz")
+			message_admins("[key_name(usr)] selected '[SSticker.mode.active_lz]'.")
+			if(SSticker.mode.active_lz)
+				return
+			var/lz_choices = list("lz1", "lz2")
+			var/new_lz = tgui_input_list(usr, "Select primary LZ", "LZ Select", lz_choices)
+			if(!new_lz)
+				return
+			if(new_lz == "lz1")
+				SSticker.mode.select_lz(locate(/obj/structure/machinery/computer/shuttle/dropship/flight/lz1))
+			else
+				SSticker.mode.select_lz(locate(/obj/structure/machinery/computer/shuttle/dropship/flight/lz2))
+			message_admins("[key_name(usr)] selected '[new_lz]'.")
+			message_admins("[key_name(usr)] saved '[SSticker.mode.active_lz]'.")
+
+		if("pick_squad")
+			var/list/squad_list = list()
+			for(var/datum/squad/S in GLOB.RoleAuthority.squads)
+				if(S.active && S.faction == faction)
+					squad_list += S.name
+			squad_list += COMMAND_SQUAD
+
+			var/name_sel = tgui_input_list(usr, "Which squad would you like to look at?", "Pick Squad", squad_list)
+			if(!name_sel)
+				return
+
+			if(name_sel == COMMAND_SQUAD)
+				show_command_squad = TRUE
+				current_squad = null
+
+			else
+				show_command_squad = FALSE
+
+				var/datum/squad/selected = get_squad_by_name(name_sel)
+				if(selected)
+					current_squad = selected
+					message_admins("[key_name_admin(user)] has selected '[current_squad].")
+				else
+					to_chat(usr, "[icon2html(src, usr)] [SPAN_WARNING("Invalid input. Aborting.")]")
 
 /obj/structure/machinery/computer/groundside_operations/ui_interact(mob/user as mob)
 	user.set_interaction(src)
