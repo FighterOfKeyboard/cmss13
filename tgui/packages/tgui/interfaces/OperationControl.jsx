@@ -220,7 +220,7 @@ export const OperationControl = (_props) => {
                 <Button
                   fluid={1}
                   color={squadColor}
-                  icon="triangle-exclamation"
+                  icon="users-line"
                   onClick={() => act('pick_squad')}>
                   {squadText}
                 </Button>

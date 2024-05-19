@@ -452,9 +452,7 @@
 					to_chat(user, "[icon2html(src, user)] [SPAN_WARNING("Searching for helmet cam. No helmet cam found for this marine! Tell your squad to put their helmets on!")]")
 				else if(cam && cam == new_cam)//click the camera you're watching a second time to stop watching.
 					visible_message("[icon2html(src, viewers(src))] [SPAN_BOLDNOTICE("Stopping helmet cam view of [cam_target].")]")
-					user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
-					cam = null
-					user.reset_view(null)
+					on_unset_interaction(user)
 				else if(user.client.view != GLOB.world_view_size)
 					to_chat(user, SPAN_WARNING("You're too busy peering through binoculars."))
 				else
@@ -467,27 +465,7 @@
 					user.RegisterSignal(cam, COMSIG_PARENT_QDELETING, TYPE_PROC_REF(/mob, reset_observer_view_on_deletion))
 
 
-/obj/structure/machinery/computer/overwatch/check_eye(mob/user)
-	if(user.is_mob_incapacitated(TRUE) || get_dist(user, src) > 1 || user.blinded) //user can't see - not sure why canmove is here.
-		user.unset_interaction()
-	else if(!cam || !cam.can_use()) //camera doesn't work, is no longer selected or is gone
-		user.unset_interaction()
 
-/obj/structure/machinery/computer/overwatch/on_unset_interaction(mob/user)
-	..()
-	if(!isRemoteControlling(user))
-		if(cam)
-			user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
-		cam = null
-		user.reset_view(null)
-
-/obj/structure/machinery/computer/overwatch/ui_close(mob/user)
-	..()
-	if(!isRemoteControlling(user))
-		if(cam)
-			user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
-		cam = null
-		user.reset_view(null)
 
 /obj/structure/machinery/computer/groundside_operations/ui_interact(mob/user as mob)
 	user.set_interaction(src)
