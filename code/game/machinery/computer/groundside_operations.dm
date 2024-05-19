@@ -1,5 +1,9 @@
 #define COMMAND_SQUAD "Command"
 
+#define HIDE_ALMAYER 2
+#define HIDE_GROUND 1
+#define HIDE_NONE 0
+
 /obj/structure/machinery/computer/groundside_operations
 	name = "groundside operations console"
 	desc = "This can be used for various important functions."
@@ -26,10 +30,19 @@
 	var/add_pmcs = TRUE
 	var/lz_selection = TRUE
 	var/has_squad_overwatch = TRUE
-	var/faction = FACTION_MARINE
+	var/faction = FACTION_MARINE 
 	var/show_command_squad = FALSE
 
+	var/z_hidden = 0 //which z level is ignored when showing marines.
+	var/marine_filter = list() // individual marine hiding control - list of string references
+	var/marine_filter_enabled = TRUE
+
+	var/list/squad_list = list()
+			
+
 /obj/structure/machinery/computer/groundside_operations/Initialize()
+	if (current_squad == null)
+		current_squad = GLOB.RoleAuthority.squads_by_type[/datum/squad/marine]
 	if(SSticker.mode && MODE_HAS_FLAG(MODE_FACTION_CLASH))
 		add_pmcs = FALSE
 	else if(SSticker.current_state < GAME_STATE_PLAYING)
@@ -56,7 +69,7 @@
 	return attack_hand(user)
 
 /obj/structure/machinery/computer/groundside_operations/attack_hand(mob/user as mob)
-	if(..() || !allowed(user) || inoperable())
+	if(..() || inoperable())
 		return
 
 	if(!allowed(user))
@@ -107,9 +120,187 @@
 
 	data["selected_LZ"] = SSticker.mode.active_lz
 
-	data["evac_status"] = SShijack.evac_status
-	if(SShijack.evac_status == EVACUATION_STATUS_INITIATED)
-		data["evac_eta"] = SShijack.get_evac_eta()
+	data["current_squad"] = current_squad.name
+	data["marines"] = list()
+
+	var/leader_count = 0
+	var/ftl_count = 0
+	var/spec_count = 0
+	var/medic_count = 0
+	var/engi_count = 0
+	var/smart_count = 0
+	var/marine_count = 0
+
+	var/leaders_alive = 0
+	var/ftl_alive = 0
+	var/spec_alive= 0
+	var/medic_alive= 0
+	var/engi_alive = 0
+	var/smart_alive = 0
+	var/marines_alive = 0
+
+	var/specialist_type
+
+	var/SL_z //z level of the Squad Leader
+	if(current_squad.squad_leader)
+		var/turf/SL_turf = get_turf(current_squad.squad_leader)
+		SL_z = SL_turf.z
+
+	for(var/marine in current_squad.marines_list)
+		if(!marine)
+			continue //just to be safe
+		var/mob_name = "unknown"
+		var/mob_state = ""
+		var/has_helmet = TRUE
+		var/role = "unknown"
+		var/acting_sl = ""
+		var/fteam = ""
+		var/distance = "???"
+		var/area_name = "???"
+		var/is_squad_leader = FALSE
+		var/mob/living/carbon/human/marine_human
+
+
+		if(ishuman(marine))
+			marine_human = marine
+			if(istype(marine_human.loc, /obj/structure/machinery/cryopod)) //We don't care much for these
+				continue
+			mob_name = marine_human.real_name
+			var/area/current_area = get_area(marine_human)
+			var/turf/current_turf = get_turf(marine_human)
+			if(!current_turf)
+				continue
+			if(current_area)
+				area_name = sanitize_area(current_area.name)
+
+			switch(z_hidden)
+				if(HIDE_ALMAYER)
+					if(is_mainship_level(current_turf.z))
+						continue
+				if(HIDE_GROUND)
+					if(is_ground_level(current_turf.z))
+						continue
+
+			if(marine_human.job)
+				role = marine_human.job
+			else if(istype(marine_human.wear_id, /obj/item/card/id)) //decapitated marine is mindless,
+				var/obj/item/card/id/ID = marine_human.wear_id //we use their ID to get their role.
+				if(ID.rank)
+					role = ID.rank
+
+
+			if(current_squad.squad_leader)
+				if(marine_human == current_squad.squad_leader)
+					distance = "N/A"
+					if(current_squad.name == SQUAD_SOF)
+						if(marine_human.job == JOB_MARINE_RAIDER_CMD)
+							acting_sl = " (direct command)"
+						else if(marine_human.job != JOB_MARINE_RAIDER_SL)
+							acting_sl = " (acting TL)"
+					else if(marine_human.job != JOB_SQUAD_LEADER)
+						acting_sl = " (acting SL)"
+					is_squad_leader = TRUE
+				else if(current_turf && (current_turf.z == SL_z))
+					distance = "[get_dist(marine_human, current_squad.squad_leader)] ([dir2text_short(Get_Compass_Dir(current_squad.squad_leader, marine_human))])"
+
+
+			switch(marine_human.stat)
+				if(CONSCIOUS)
+					mob_state = "Conscious"
+
+				if(UNCONSCIOUS)
+					mob_state = "Unconscious"
+
+				if(DEAD)
+					mob_state = "Dead"
+
+			if(!istype(marine_human.head, /obj/item/clothing/head/helmet/marine))
+				has_helmet = FALSE
+
+			if(!marine_human.key || !marine_human.client)
+				if(marine_human.stat != DEAD)
+					mob_state += " (SSD)"
+
+
+			if(marine_human.assigned_fireteam)
+				fteam = " [marine_human.assigned_fireteam]"
+
+		else //listed marine was deleted or gibbed, all we have is their name
+			for(var/datum/data/record/marine_record as anything in GLOB.data_core.general)
+				if(marine_record.fields["name"] == marine)
+					role = marine_record.fields["real_rank"]
+					break
+			mob_state = "Dead"
+			mob_name = marine
+
+
+		switch(role)
+			if(JOB_SQUAD_LEADER)
+				leader_count++
+				if(mob_state != "Dead")
+					leaders_alive++
+			if(JOB_SQUAD_TEAM_LEADER)
+				ftl_count++
+				if(mob_state != "Dead")
+					ftl_alive++
+			if(JOB_SQUAD_SPECIALIST)
+				spec_count++
+				if(marine_human)
+					if(istype(marine_human.wear_id, /obj/item/card/id)) //decapitated marine is mindless,
+						var/obj/item/card/id/ID = marine_human.wear_id //we use their ID to get their role.
+						if(ID.assignment)
+							if(specialist_type)
+								specialist_type = "MULTIPLE"
+							else
+								var/list/spec_type = splittext(ID.assignment, "(")
+								if(islist(spec_type) && (length(spec_type) > 1))
+									specialist_type = splittext(spec_type[2], ")")[1]
+				else if(!specialist_type)
+					specialist_type = "UNKNOWN"
+				if(mob_state != "Dead")
+					spec_alive++
+			if(JOB_SQUAD_MEDIC)
+				medic_count++
+				if(mob_state != "Dead")
+					medic_alive++
+			if(JOB_SQUAD_ENGI)
+				engi_count++
+				if(mob_state != "Dead")
+					engi_alive++
+			if(JOB_SQUAD_SMARTGUN)
+				smart_count++
+				if(mob_state != "Dead")
+					smart_alive++
+			if(JOB_SQUAD_MARINE)
+				marine_count++
+				if(mob_state != "Dead")
+					marines_alive++
+
+		var/marine_data = list(list("name" = mob_name, "state" = mob_state, "has_helmet" = has_helmet, "role" = role, "acting_sl" = acting_sl, "fteam" = fteam, "distance" = distance, "area_name" = area_name,"ref" = REF(marine)))
+		data["marines"] += marine_data
+		if(is_squad_leader)
+			if(!data["squad_leader"])
+				data["squad_leader"] = marine_data[1]
+
+	data["total_deployed"] = leader_count + ftl_count + spec_count + medic_count + engi_count + smart_count + marine_count
+	data["living_count"] = leaders_alive + ftl_alive + spec_alive + medic_alive + engi_alive + smart_alive + marines_alive
+
+	data["leader_count"] = leader_count
+	data["ftl_count"] = ftl_count
+	data["spec_count"] = spec_count
+	data["medic_count"] = medic_count
+	data["engi_count"] = engi_count
+	data["smart_count"] = smart_count
+
+	data["leaders_alive"] = leaders_alive
+	data["ftl_alive"] = ftl_alive
+	data["spec_alive"] = spec_alive
+	data["medic_alive"] = medic_alive
+	data["engi_alive"] = engi_alive
+	data["smart_alive"] = smart_alive
+	data["specialist_type"] = specialist_type ? specialist_type : "NONE"
+
+	data["z_hidden"] = z_hidden
 
 	if(!messagetitle.len)
 		data["messages"] = null
@@ -210,7 +401,6 @@
 			message_admins("[key_name(usr)] activated Echo Squad for '[reason]'.")
 
 		if("selectlz")
-			message_admins("[key_name(usr)] selected '[SSticker.mode.active_lz]'.")
 			if(SSticker.mode.active_lz)
 				return
 			var/lz_choices = list("lz1", "lz2")
@@ -222,16 +412,16 @@
 			else
 				SSticker.mode.select_lz(locate(/obj/structure/machinery/computer/shuttle/dropship/flight/lz2))
 			message_admins("[key_name(usr)] selected '[new_lz]'.")
-			message_admins("[key_name(usr)] saved '[SSticker.mode.active_lz]'.")
 
 		if("pick_squad")
-			var/list/squad_list = list()
+			squad_list = list()
 			for(var/datum/squad/S in GLOB.RoleAuthority.squads)
 				if(S.active && S.faction == faction)
 					squad_list += S.name
 			squad_list += COMMAND_SQUAD
 
 			var/name_sel = tgui_input_list(usr, "Which squad would you like to look at?", "Pick Squad", squad_list)
+			message_admins("[key_name(usr)] selected '[name_sel]'.")
 			if(!name_sel)
 				return
 
@@ -245,9 +435,59 @@
 				var/datum/squad/selected = get_squad_by_name(name_sel)
 				if(selected)
 					current_squad = selected
-					message_admins("[key_name_admin(user)] has selected '[current_squad].")
 				else
 					to_chat(usr, "[icon2html(src, usr)] [SPAN_WARNING("Invalid input. Aborting.")]")
+
+		if("watch_camera")
+			if(isRemoteControlling(user))
+				to_chat(user, "[icon2html(src, user)] [SPAN_WARNING("Unable to override console camera viewer. Track with camera instead. ")]")
+				return
+			if(!params["target_ref"])
+				to_chat(user, SPAN_WARNING("no parameter found i guess"))
+				return
+			if(current_squad)
+				var/mob/cam_target = locate(params["target_ref"])
+				var/obj/structure/machinery/camera/new_cam = get_camera_from_target(cam_target)
+				if(!new_cam || !new_cam.can_use())
+					to_chat(user, "[icon2html(src, user)] [SPAN_WARNING("Searching for helmet cam. No helmet cam found for this marine! Tell your squad to put their helmets on!")]")
+				else if(cam && cam == new_cam)//click the camera you're watching a second time to stop watching.
+					visible_message("[icon2html(src, viewers(src))] [SPAN_BOLDNOTICE("Stopping helmet cam view of [cam_target].")]")
+					user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
+					cam = null
+					user.reset_view(null)
+				else if(user.client.view != GLOB.world_view_size)
+					to_chat(user, SPAN_WARNING("You're too busy peering through binoculars."))
+				else
+					to_chat(user, SPAN_WARNING("test 1"))
+					if(cam)
+						to_chat(user, SPAN_WARNING("test 2"))
+						user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
+					cam = new_cam
+					user.reset_view(cam)
+					user.RegisterSignal(cam, COMSIG_PARENT_QDELETING, TYPE_PROC_REF(/mob, reset_observer_view_on_deletion))
+
+
+/obj/structure/machinery/computer/overwatch/check_eye(mob/user)
+	if(user.is_mob_incapacitated(TRUE) || get_dist(user, src) > 1 || user.blinded) //user can't see - not sure why canmove is here.
+		user.unset_interaction()
+	else if(!cam || !cam.can_use()) //camera doesn't work, is no longer selected or is gone
+		user.unset_interaction()
+
+/obj/structure/machinery/computer/overwatch/on_unset_interaction(mob/user)
+	..()
+	if(!isRemoteControlling(user))
+		if(cam)
+			user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
+		cam = null
+		user.reset_view(null)
+
+/obj/structure/machinery/computer/overwatch/ui_close(mob/user)
+	..()
+	if(!isRemoteControlling(user))
+		if(cam)
+			user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
+		cam = null
+		user.reset_view(null)
 
 /obj/structure/machinery/computer/groundside_operations/ui_interact(mob/user as mob)
 	user.set_interaction(src)
@@ -585,3 +825,6 @@
 	minimap_type = MINIMAP_FLAG_PMC
 
 #undef COMMAND_SQUAD
+#undef HIDE_ALMAYER
+#undef HIDE_GROUND
+#undef HIDE_NONE

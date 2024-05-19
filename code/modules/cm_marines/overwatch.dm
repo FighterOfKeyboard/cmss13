@@ -509,8 +509,8 @@
 					user.reset_view(null)
 				else if(user.client.view != GLOB.world_view_size)
 					to_chat(user, SPAN_WARNING("You're too busy peering through binoculars."))
-				else
-					if(cam)
+				else					
+					if(cam)					
 						user.UnregisterSignal(cam, COMSIG_PARENT_QDELETING)
 					cam = new_cam
 					user.reset_view(cam)

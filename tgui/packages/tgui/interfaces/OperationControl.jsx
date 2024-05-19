@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
-import { useBackend } from '../backend';
-import { Button, Section, Flex, NoticeBox, Collapsible, Divider, Box } from '../components';
+import { useBackend, useSharedState } from '../backend';
+import { Button, Section, Stack, Tabs, Table, Box, Input, NumberInput, LabeledControls, Divider, Collapsible, Flex, NoticeBox  } from '../components';;
 import { Window } from '../layouts';
 
 export const OperationControl = (_props) => {
@@ -12,12 +12,113 @@ export const OperationControl = (_props) => {
   const SelectedSquad = data.selected_squad;
   const ShowCommandSquad = data.show_command_squad;
 
+  const canAnnounce = data.endtime < worldTime; // announcement
+
+  const {
+    leaders_alive,
+    ftl_alive,
+    ftl_count,
+    specialist_type,
+    spec_alive,
+    smart_alive,
+    smart_count,
+    spec_count,
+    medic_count,
+    medic_alive,
+    engi_alive,
+    engi_count,
+    living_count,
+    total_deployed,
+  } = data;
+
+  const sortByRole = (a, b) => {
+    a = a.role;
+    b = b.role;
+    const roleValues = {
+      'Squad Leader': 10,
+      'Fireteam Leader': 9,
+      'Weapons Specialist': 8,
+      'Smartgunner': 7,
+      'Hospital Corpsman': 6,
+      'Combat Technician': 5,
+      'Rifleman': 4,
+    };
+    let valueA = roleValues[a];
+    let valueB = roleValues[b];
+    if (a.includes('Weapons Specialist')) {
+      valueA = roleValues['Weapons Specialist'];
+    }
+    if (b.includes('Weapons Specialist')) {
+      valueB = roleValues['Weapons Specialist'];
+    }
+    if (!valueA && !valueB) return 0; // They're both unknown
+    if (!valueA) return 1; // B is defined but A is not
+    if (!valueB) return -1; // A is defined but B is not
+
+    if (valueA > valueB) return -1; // A is more important
+    if (valueA < valueB) return 1; // B is more important
+
+    return 0; // They're equal
+  };
+
+  let { marines, squad_leader } = data;
+
+  const [hidden_marines, setHiddenMarines] = useSharedState(
+    'hidden_marines',
+    []
+  );
+
+  const [showHiddenMarines, setShowHiddenMarines] = useSharedState(
+    'showhidden',
+    false
+  );
+  const [showDeadMarines, setShowDeadMarines] = useSharedState(
+    'showdead',
+    false
+  );
+
+  const [marineSearch, setMarineSearch] = useSharedState('marinesearch', null);
+
+  let determine_status_color = (status) => {
+    let conscious = status.includes('Conscious');
+    let unconscious = status.includes('Unconscious');
+
+    let state_color = 'red';
+    if (conscious) {
+      state_color = 'green';
+    } else if (unconscious) {
+      state_color = 'yellow';
+    }
+    return state_color;
+  };
+
+  let toggle_marine_hidden = (ref) => {
+    if (!hidden_marines.includes(ref)) {
+      setHiddenMarines([...hidden_marines, ref]);
+    } else {
+      let array_copy = [...hidden_marines];
+      let index = array_copy.indexOf(ref);
+      if (index > -1) {
+        array_copy.splice(index, 1);
+      }
+      setHiddenMarines(array_copy);
+    }
+  };
+
+  let location_filter;
+  if (data.z_hidden === 2) {
+    location_filter = 'groundside';
+  } else if (data.z_hidden === 1) {
+    location_filter = 'shipside';
+  } else {
+    location_filter = 'all';
+  }
 
   const selectedLZ = data.selected_LZ;/*(data.selected_LZ !== 'lz1' || data.selected_LZ !== 'lz2');*/
   
 
 
-  const canAnnounce = data.endtime < worldTime; // announcement
+ 
 
   let canSelectLZ;
   if (selectedLZ === '' || selectedLZ === null) {
@@ -44,6 +145,9 @@ export const OperationControl = (_props) => {
   if (SelectedSquad === 'Delta') {
     squadColor = 'blue';
   }
+  if (SelectedSquad === 'Foxtrot') {
+    squadColor = 'brown';
+  }
   if (SelectedSquad === 'Echo') {
     squadColor = 'teal';
   }
@@ -57,7 +161,7 @@ export const OperationControl = (_props) => {
   }
 
   return (
-    <Window width={450} height={700}>
+    <Window width={600} height={800}>
       <Window.Content scrollable>
         <Section title="Operation Control">
           <Flex height="100%" direction="column">
@@ -121,6 +225,106 @@ export const OperationControl = (_props) => {
                   {squadText}
                 </Button>
               </Flex.Item>
+              <NoticeBox color={squadColor} warning={1} textAlign="center">
+                Living count: {living_count}; Total deployed: {total_deployed};
+                Medic count: {medic_count}; Engineer count: {engi_count};
+              </NoticeBox>
+            </Section>
+            <Section title="Squad Marines">
+              <Input
+                fluid
+                placeholder="Search.."
+                mb="4px"
+                value={marineSearch}
+                onInput={(e, value) => setMarineSearch(value)}
+              />
+              <Table>
+                <Table.Row bold fontSize="14px">
+                  <Table.Cell textAlign="center">Name</Table.Cell>
+                  <Table.Cell textAlign="center">Role</Table.Cell>
+                  <Table.Cell textAlign="center" collapsing>
+                    State
+                  </Table.Cell>
+                  <Table.Cell textAlign="center">Location</Table.Cell>
+                  <Table.Cell textAlign="center" collapsing fontSize="12px">
+                    SL Dist.
+                  </Table.Cell>
+                  <Table.Cell textAlign="center" />
+                </Table.Row>
+                {squad_leader && (
+                  <Table.Row key="index" bold>
+                    <Table.Cell collapsing p="2px">
+                      {(squad_leader.has_helmet && (
+                        <Button
+                          onClick={() =>
+                            act('watch_camera', { target_ref: squad_leader.ref })
+                          }>
+                          {squad_leader.name}
+                        </Button>
+                      )) || <Box color="yellow">{squad_leader.name} (NO HELMET)</Box>}
+                    </Table.Cell>
+                    <Table.Cell p="2px">{squad_leader.role}</Table.Cell>
+                    <Table.Cell
+                      p="2px"
+                      color={determine_status_color(squad_leader.state)}>
+                      {squad_leader.state}
+                    </Table.Cell>
+                    <Table.Cell p="2px">{squad_leader.area_name}</Table.Cell>
+                    <Table.Cell p="2px" collapsing>
+                      {squad_leader.distance}
+                    </Table.Cell>
+                    <Table.Cell />
+                  </Table.Row>
+                )}
+                {marines &&
+                  marines
+                    .sort(sortByRole)
+                    .filter((marine) => {
+                      if (marineSearch) {
+                        const searchableString = String(marine.name).toLowerCase();
+                        return searchableString.match(new RegExp(marineSearch, 'i'));
+                      }
+                      return marine;
+                    })
+                    .map((marine, index) => {
+                      if (squad_leader) {
+                        if (marine.ref === squad_leader.ref) {
+                          return;
+                        }
+                      }
+                      if (hidden_marines.includes(marine.ref) && !showHiddenMarines) {
+                        return;
+                      }
+                      if (marine.state === 'Dead' && !showDeadMarines) {
+                        return;
+                      }
+
+                      return (
+                        <Table.Row key={index}>
+                          <Table.Cell collapsing p="2px">
+                            {(marine.has_helmet && (
+                              <Button
+                                onClick={() =>
+                                  act('watch_camera', { target_ref: marine.ref })
+                                }>
+                                {marine.name}
+                              </Button>
+                            )) || <Box color="yellow">{marine.name} (NO HELMET)</Box>}
+                          </Table.Cell>
+                          <Table.Cell p="2px">{marine.role}</Table.Cell>
+                          <Table.Cell
+                            p="2px"
+                            color={determine_status_color(marine.state)}>
+                            {marine.state}
+                          </Table.Cell>
+                          <Table.Cell p="2px">{marine.area_name}</Table.Cell>
+                          <Table.Cell p="2px" collapsing>
+                            {marine.distance}
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })}
+              </Table>
             </Section>
           </Flex>
         </Section>
